@@ -2,11 +2,8 @@ package main
 
 import (
 	"bytes"
-	"embed"
 	"flag"
-	"fmt"
 	"html"
-	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -18,32 +15,16 @@ import (
 	"time"
 
 	"github.com/coyove/bbolt"
-	"github.com/coyove/sdss/contrib/plru"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/image/font/opentype"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
-
-//go:embed static/*
-var httpStaticPages embed.FS
-
-//go:embed static/assets/*
-var httpStaticAssets embed.FS
-
-var uuid = strconv.Itoa(int(time.Now().Unix()))
-
-var httpTemplates = template.Must(template.New("ts").Funcs(template.FuncMap{
-	"ServeUUID": func() string {
-		return uuid
-	},
-}).ParseFS(httpStaticPages, "static/*.*"))
 
 var world struct {
 	sync.Mutex
 	channels   map[string]*Channel
 	totalUsers atomic.Int64
 	store      *bbolt.DB
-	sendDedup  *plru.Cache[uint64, struct{}]
 }
 
 func purgeWorld() {
@@ -82,7 +63,6 @@ func main() {
 	}
 
 	world.channels = map[string]*Channel{}
-	world.sendDedup = plru.New[uint64, struct{}](1000, plru.Hash.Uint64, nil)
 	world.store, err = bbolt.Open("chat.db", 0644, &bbolt.Options{
 		FreelistType: bbolt.FreelistMapType,
 	})
@@ -116,15 +96,13 @@ func main() {
 	// 	}
 	// }()
 
-	mux := http.NewServeMux()
+	handle("/", handleIndex)
 
-	mux.HandleFunc("/", handleIndex)
+	handle("/~send/", handleSend)
 
-	mux.HandleFunc("/~send/", handleSend)
-
-	mux.HandleFunc("/~link/", func(w http.ResponseWriter, r *http.Request) {
-		name := sanitizeChannelName(r.URL.Path[7:])
-		idx, _ := strconv.ParseInt(r.URL.Query().Get("link"), 16, 64)
+	handle("/~link/", func(c Ctx) {
+		name := sanitizeChannelName(c.URL.Path[7:])
+		idx, _ := strconv.ParseInt(c.Query.Get("link"), 16, 64)
 		world.Lock()
 		ch, ok := world.channels[name]
 		world.Unlock()
@@ -141,38 +119,31 @@ func main() {
 		}
 
 		if link == "" {
-			w.Header().Add("Content-Type", "text/html")
+			c.ResponseWriter.Header().Add("Content-Type", "text/html")
 			if len(links) > 0 {
-				fmt.Fprintf(w, `
+				c.Printf(`
             <p>
             Link %x doesn't exist in the current channel.<br>
             Here are currently available links on screen:<br>
             `, idx)
 				for i := 0; i < 16 && i < len(links); i++ {
 					u := html.EscapeString(links[i])
-					fmt.Fprintf(w, `%x: <a href="%s">%s</a><br>`, i, u, u)
+					c.Printf(`%x: <a href="%s">%s</a><br>`, i, u, u)
 				}
 			} else {
-				fmt.Fprintf(w, `<p>This channel doesn't have any links. 
+				c.Printf(`<p>This channel doesn't have any links. 
                 New link appeared on chat screen will be assigned a tag, so you know which to open.
                 </p>`)
 			}
 		} else {
-			http.Redirect(w, r, link, 302)
+			c.Redirect(302, link)
 		}
 	})
 
-	mux.HandleFunc("/~stream", func(w http.ResponseWriter, r *http.Request) {
-		uid := getuid(r)
-		if uid == "" {
-			setuid(w, r, "")
-			http.Redirect(w, r, r.URL.String(), 302)
-			return
-		}
-
-		name := r.URL.Query().Get("name")
+	handle("/~stream", func(c Ctx) {
+		name := c.Query.Get("name")
 		if name == "" {
-			w.WriteHeader(404)
+			c.WriteHeader(404)
 			return
 		}
 
@@ -183,7 +154,7 @@ func main() {
 			ch, err = loadChannel(name)
 			if err != nil {
 				world.Unlock()
-				w.WriteHeader(500)
+				c.WriteHeader(500)
 				logrus.Errorf("load channel: %v", err)
 				return
 			}
@@ -191,27 +162,26 @@ func main() {
 		}
 		world.Unlock()
 
-		ch.Join(uid, w, r)
+		ch.Join(c.Uid, c)
 	})
 
-	mux.HandleFunc("/~static/", func(w http.ResponseWriter, r *http.Request) {
-		p := strings.TrimPrefix(r.URL.Path, "/~static/")
+	handle("/~static/", func(c Ctx) {
+		p := strings.TrimPrefix(c.URL.Path, "/~static/")
 		switch {
 		case strings.HasSuffix(p, ".css"):
-			w.Header().Add("Content-Type", "text/css")
+			c.ResponseWriter.Header().Add("Content-Type", "text/css")
 		case strings.HasSuffix(p, ".png"):
-			w.Header().Add("Content-Type", "image/png")
+			c.ResponseWriter.Header().Add("Content-Type", "image/png")
 		}
-		w.Header().Add("Cache-Control", "public, max-age=8640000")
+		c.ResponseWriter.Header().Add("Cache-Control", "public, max-age=8640000")
 
 		buf, _ := httpStaticAssets.ReadFile("static/assets/" + p)
-		w.Write(buf)
+		c.ResponseWriter.Write(buf)
 	})
 
 	addr := ":8888"
 	srv := http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr: addr,
 	}
 	logrus.Infof("serving at %v", addr)
 	logrus.Fatal(srv.ListenAndServe())

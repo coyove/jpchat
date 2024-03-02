@@ -1,35 +1,85 @@
 package main
 
 import (
-	"net/http"
-	"strconv"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha1"
+	"encoding/binary"
+	"encoding/hex"
 	"time"
 
+	"github.com/coyove/sdss/contrib/plru"
 	"github.com/sirupsen/logrus"
 )
 
-func handleSend(w http.ResponseWriter, r *http.Request) {
-	uid := getuid(r)
-	if uid == "" {
-		w.Write([]byte("invalid cookie"))
-		return
-	}
+func randBytes(len int) []byte {
+	key := make([]byte, len)
+	rand.Read(key)
+	return key
+}
 
+var aesToken = func() cipher.Block {
+	blk, _ := aes.NewCipher(randBytes(16))
+	return blk
+}()
+
+var tokenStore = plru.New[uint64, struct{}](60000, plru.Hash.Uint64, nil)
+
+func makeToken(c Ctx) string {
+	enc, _ := cipher.NewGCM(aesToken)
+	nonce := randBytes(12)
+	data := sha1.Sum(c.IP)
+	return hex.EncodeToString(enc.Seal(nonce, nonce,
+		binary.BigEndian.AppendUint32(data[:4:8], uint32(time.Now().Unix())), nil))
+}
+
+func validateToken(c Ctx, tok string) bool {
+	data, _ := hex.DecodeString(tok)
+
+	enc, _ := cipher.NewGCM(aesToken)
+	if len(data) < enc.NonceSize() {
+		return false
+	}
+	nonce := data[:enc.NonceSize()]
+	data = data[enc.NonceSize():]
+
+	data, err := enc.Open(nil, nonce, data, nil)
+	if err != nil {
+		return false
+	}
+	if len(data) != 8 {
+		return false
+	}
+	v := binary.BigEndian.Uint64(data)
+	if _, ok := tokenStore.Get(v); ok {
+		return false
+	}
+	tokenStore.Add(v, struct{}{})
+
+	ipHash := sha1.Sum(c.IP)
+	if binary.BigEndian.Uint32(ipHash[:4]) != uint32(v>>32) {
+		logrus.Errorf("validate token: mismatch IPs")
+		return false
+	}
+	if uint32(time.Now().Unix())-uint32(v) > 86400 {
+		logrus.Errorf("validate token: too old")
+		return false
+	}
+	return true
+}
+
+func handleSend(c Ctx) {
 	var name string
 	var err string
-	if r.Method == "POST" {
-		msg := sanitizeMessage(r.FormValue("msg"))
-		name = sanitizeChannelName(r.FormValue("channel"))
+	if c.Method == "POST" {
+		msg := sanitizeMessage(c.FormValue("msg"))
+		name = sanitizeChannelName(c.FormValue("channel"))
 
-		tok, _ := strconv.ParseUint(r.FormValue("token"), 10, 64)
-		if tok == 0 {
-			err = "Invalid token"
+		tok := c.FormValue("token")
+		if !validateToken(c, tok) {
 			goto NO_SEND
 		}
-		if _, ok := world.sendDedup.Get(tok); ok {
-			goto NO_SEND
-		}
-		world.sendDedup.Add(tok, struct{}{})
 
 		world.Lock()
 		ch, ok := world.channels[name]
@@ -37,7 +87,7 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 
 		if len(msg) > 0 && ok {
 			e := ch.Append(Message{
-				From: uid,
+				From: c.Uid,
 				Text: msg,
 			})
 			if e == nil {
@@ -48,24 +98,21 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		name = sanitizeChannelName(r.URL.Path[7:])
+		name = sanitizeChannelName(c.URL.Path[7:])
 	}
 
 NO_SEND:
 	if name == "" {
-		w.WriteHeader(404)
+		c.WriteHeader(404)
 		return
 	}
 
-	tok := time.Now().UnixNano()
-
-	w.Header().Add("Content-Type", "text/html")
-	httpTemplates.ExecuteTemplate(w, "send.html", map[string]any{
+	c.Template("send.html", map[string]any{
 		"name":  name,
-		"uid":   uid,
-		"multi": r.URL.Query().Get("multi") != "",
+		"uid":   c.Uid,
+		"multi": c.Query.Get("multi") != "",
 		"err":   err,
-		"token": tok,
+		"token": makeToken(c),
 	})
 }
 

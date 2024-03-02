@@ -9,7 +9,6 @@ import (
 	"image/draw"
 	"math/rand"
 	"net"
-	"net/http"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -194,15 +193,8 @@ func (ch *Channel) Refresh(q int) {
 	ch.mu.Unlock()
 }
 
-func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
-	addr, err := net.ResolveTCPAddr("tcp", r.RemoteAddr)
-	if err != nil {
-		w.WriteHeader(400)
-		return
-	}
-	ip := addr.IP.To16()
-
-	si, _ := strconv.Atoi(r.URL.Query().Get("screen"))
+func (ch *Channel) Join(uid string, c Ctx) {
+	si, _ := strconv.Atoi(c.Query.Get("screen"))
 	if si == 800 {
 		si = 1
 	} else {
@@ -212,7 +204,7 @@ func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
 	ch.mu.Lock()
 	switching := false
 	if arr, ok := ch.onlines[uid]; ok {
-		if bytes.Equal(ip, arr[len(arr)-1].ip) {
+		if bytes.Equal(c.IP, arr[len(arr)-1].ip) {
 			for _, oldState := range arr {
 				oldState.recv <- channelNotify{
 					kicked: true,
@@ -222,15 +214,15 @@ func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
 			switching = true
 		} else {
 			ch.mu.Unlock()
-			w.Header().Add("Content-Type", "image/jpeg")
-			w.Write(makeErrorImage(400+400*si, 960, fmt.Sprintf("'%s' already exists in this channel", uid)))
-			logrus.Infof("[Channel %s] %s can't join due to same nickname %s", ch.Name, r.RemoteAddr, uid)
+			c.ResponseWriter.Header().Add("Content-Type", "image/jpeg")
+			c.Write(makeErrorImage(400+400*si, 960, fmt.Sprintf("'%s' already exists in this channel", uid)))
+			logrus.Infof("[Channel %s] %s can't join due to same nickname %s", ch.Name, c.RemoteAddr, uid)
 			return
 		}
 	}
 	state := &channelOnline{
 		uid:    uid,
-		ip:     ip,
+		ip:     c.IP,
 		si:     si,
 		recv:   make(chan channelNotify, 10),
 		joined: time.Now().Unix(),
@@ -246,17 +238,17 @@ func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
 	}
 	ch.Refresh(-1)
 
-	w.Header().Add("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-	w.WriteHeader(200)
+	c.ResponseWriter.Header().Add("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+	c.WriteHeader(200)
 	const boundary = "\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"
 
 	var note channelNotify
 RECV:
 	for note = range state.recv {
 		for i := 0; i < 4; i++ {
-			w.Write([]byte(boundary))
-			if _, err := w.Write(note.data); err != nil {
-				logrus.Errorf("stream image data to %v: %v", r.RemoteAddr, err)
+			c.Write([]byte(boundary))
+			if _, err := c.Write(note.data); err != nil {
+				logrus.Errorf("stream image data to %v: %v", c.RemoteAddr, err)
 				break RECV
 			}
 		}
