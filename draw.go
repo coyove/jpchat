@@ -21,7 +21,7 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-const lineHeight = 24
+const lineHeight = 22
 
 const (
 	emojiAdvance = 30

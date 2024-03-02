@@ -23,12 +23,18 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+const screenHeight = 960
+
+var screenWidths = [...]int{400, 800}
+
 type channelNotify struct {
-	data     []byte
-	kickedBy string
+	data   []byte
+	kicked bool
 }
 
 type channelOnline struct {
+	uid    string
+	si     int
 	recv   chan channelNotify
 	ip     net.IP
 	joined int64
@@ -40,11 +46,8 @@ type Channel struct {
 
 	mu sync.Mutex
 
-	screen [2]struct {
-		waiters     []chan channelNotify
-		lastImgData []byte
-	}
-	onlines     map[string]*channelOnline
+	lastImgData [2][]byte
+	onlines     map[string][]*channelOnline
 	links       []string
 	lastElapsed int64
 	data        []Message
@@ -58,7 +61,7 @@ type Channel struct {
 func loadChannel(name string) (*Channel, error) {
 	r := &Channel{}
 	r.Name = name
-	r.onlines = map[string]*channelOnline{}
+	r.onlines = map[string][]*channelOnline{}
 	r.nameHash = crc32.ChecksumIEEE([]byte(r.Name))
 	r.idctr = rand.Uint64()
 	r.autoRefresh = time.AfterFunc(time.Second*10, r.doAutoRefresh)
@@ -99,10 +102,7 @@ func (ch *Channel) Close() {
 func (ch *Channel) Len() (sz int) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
-	for _, x := range ch.screen {
-		sz += len(x.waiters)
-	}
-	return
+	return len(ch.onlines)
 }
 
 func (ch *Channel) Append(e Message) error {
@@ -161,37 +161,30 @@ func (ch *Channel) Refresh(q int) {
 	}
 
 	start := time.Now()
-	w := [2]bytes.Buffer{}
-	// jpeg.Encode(w, room.render(400, 960), &jpeg.Options{Quality: q})
-	webp.Encode(&w[0], ch.render(0, 400, 960), &webp.Options{Quality: float32(q)})
-	webp.Encode(&w[1], ch.render(1, 800, 960), &webp.Options{Quality: float32(q)})
-	// w.WriteString(fmt.Sprintf(`
-	//     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 32" width="200" height="32">
-	// <g>
-	//     <text x="0" y="20">%v</text>
-	//     <circle cx="16" cy="16" r="10" stroke-width="2" fill="transparent" stroke="#e57373" />
-	//     <path d="M16 11 L16 16" stroke-linecap="round" stroke-width="4" stroke="#e57373" />
-	//     <circle cx="16" cy="21" r="2" fill="#e57373" />
-	// </g>
-	// </svg>
-	//     `, time.Now()))
+	var outs [][]byte
+	for i, w := range screenWidths {
+		out := bytes.Buffer{}
+		webp.Encode(&out, ch.render(i, w, screenHeight), &webp.Options{Quality: float32(q)})
+		outs = append(outs, out.Bytes())
+	}
 
 	ch.mu.Lock()
-	for i := range ch.screen {
-		ch.traffic += int64(w[i].Len())
+	for i, data := range outs {
+		ch.traffic += int64(len(data))
+		ch.lastImgData[i] = data
+	}
 
-		ch.screen[i].lastImgData = w[i].Bytes()
-
-		for _, waiter := range ch.screen[i].waiters {
+	for _, arr := range ch.onlines {
+		for _, waiter := range arr {
 		EXHAUST:
 			select {
-			case <-waiter:
+			case <-waiter.recv:
 				goto EXHAUST
 			default:
 			}
 
 			select {
-			case waiter <- channelNotify{data: w[i].Bytes()}:
+			case waiter.recv <- channelNotify{data: outs[waiter.si]}:
 			default:
 			}
 		}
@@ -217,31 +210,35 @@ func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
 	}
 
 	ch.mu.Lock()
-	recv := make(chan channelNotify, 10)
-	ch.screen[si].waiters = append(ch.screen[si].waiters, recv)
-	if last := ch.screen[si].lastImgData; len(last) > 0 {
-		recv <- channelNotify{data: last}
-	}
-
 	switching := false
-	if state, ok := ch.onlines[uid]; ok {
-		if bytes.Equal(ip, state.ip) {
-			state.recv <- channelNotify{kickedBy: r.RemoteAddr}
+	if arr, ok := ch.onlines[uid]; ok {
+		if bytes.Equal(ip, arr[len(arr)-1].ip) {
+			for _, oldState := range arr {
+				oldState.recv <- channelNotify{
+					kicked: true,
+					data:   makeErrorImage(screenWidths[oldState.si], screenHeight, "Chat has been opened elsewhere"),
+				}
+			}
 			switching = true
 		} else {
 			ch.mu.Unlock()
 			w.Header().Add("Content-Type", "image/jpeg")
 			w.Write(makeErrorImage(400+400*si, 960, fmt.Sprintf("'%s' already exists in this channel", uid)))
-			logrus.Infof("[Channel %s] %s from %s failed to kick out %s", ch.Name, uid, ip, state.ip)
+			logrus.Infof("[Channel %s] %s can't join due to same nickname %s", ch.Name, r.RemoteAddr, uid)
 			return
 		}
 	}
 	state := &channelOnline{
+		uid:    uid,
 		ip:     ip,
-		recv:   recv,
+		si:     si,
+		recv:   make(chan channelNotify, 10),
 		joined: time.Now().Unix(),
 	}
-	ch.onlines[uid] = state
+	ch.onlines[uid] = append(ch.onlines[uid], state)
+	if last := ch.lastImgData[si]; len(last) > 0 {
+		state.recv <- channelNotify{data: last}
+	}
 	ch.mu.Unlock()
 
 	if !switching {
@@ -253,14 +250,9 @@ func (ch *Channel) Join(uid string, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	const boundary = "\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"
 
-	peacefullyExit := true
+	var note channelNotify
 RECV:
-	for note := range recv {
-		if note.kickedBy != "" {
-			logrus.Infof("[Channel %s] %s has switched window, old one lived %vs", ch.Name, uid, time.Now().Unix()-state.joined)
-			peacefullyExit = false
-			break
-		}
+	for note = range state.recv {
 		for i := 0; i < 4; i++ {
 			w.Write([]byte(boundary))
 			if _, err := w.Write(note.data); err != nil {
@@ -268,21 +260,25 @@ RECV:
 				break RECV
 			}
 		}
-	}
-
-	ch.mu.Lock()
-	for i := range ch.screen[si].waiters {
-		if ch.screen[si].waiters[i] == recv {
-			ch.screen[si].waiters = append(ch.screen[si].waiters[:i], ch.screen[si].waiters[i+1:]...)
+		if note.kicked {
+			logrus.Infof("[Channel %s] %s has switched window, old one lived %vs", ch.Name, uid, time.Now().Unix()-state.joined)
 			break
 		}
 	}
-	if ch.onlines[uid] == state {
-		delete(ch.onlines, uid)
+
+	ch.mu.Lock()
+	for i, w := range ch.onlines[uid] {
+		if w == state {
+			ch.onlines[uid] = append(ch.onlines[uid][:i], ch.onlines[uid][i+1:]...)
+			if len(ch.onlines[uid]) == 0 {
+				delete(ch.onlines, uid)
+			}
+			break
+		}
 	}
 	ch.mu.Unlock()
 
-	if peacefullyExit {
+	if !note.kicked {
 		ch.Append(Message{From: uid, Type: MessageLeave})
 	}
 	ch.Refresh(-1)
@@ -309,7 +305,6 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 	const contentLeft = margin * 2.5
 
 	// m := face.Metrics()
-	lineHeight := 22 // m.Height.Round() * 5 / 4
 	barHeight := lineHeight * 3 / 2
 	// descent := m.Descent.Round()
 
@@ -317,9 +312,10 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 
 	ch.mu.Lock()
 	data := ch.data
-	if len(ch.screen[0].waiters)+len(ch.screen[1].waiters) != len(ch.onlines) {
-		logrus.Infof("channel head count mismatch: %d + %d <> %d",
-			len(ch.screen[0].waiters), len(ch.screen[1].waiters), len(ch.onlines))
+	for uid, arr := range ch.onlines {
+		if len(arr) != 1 {
+			logrus.Infof("[Channel %s] multiple nickname %s", ch.Name, uid)
+		}
 	}
 	ch.mu.Unlock()
 
@@ -508,7 +504,7 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 		d.DrawString(ts)
 
 		traffic := fmt.Sprintf("%.1ffps %d:%.2fM",
-			1000/float64(ch.lastElapsed), len(ch.screen[si].lastImgData)/1024, float64(ch.traffic)/1024/1024*4)
+			1000/float64(ch.lastElapsed), len(ch.lastImgData[si])/1024, float64(ch.traffic)/1024/1024*4)
 		tw := d.MeasureString(traffic)
 		d.Dot.X = fixed.I(w-contentLeft) - tw
 		d.DrawString(traffic)
