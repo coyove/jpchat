@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"hash/crc32"
 	"html/template"
 	"math/rand"
 	"net"
@@ -13,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -143,11 +146,12 @@ func (c Ctx) Write(p []byte) (int, error) {
 }
 
 func ipuid(ip net.IP, ua string) string {
-	h1 := crc32.ChecksumIEEE(ip.To16())
-	h2 := crc32.ChecksumIEEE([]byte(ua))
+	h := hmac.New(sha1.New, []byte(*onlineKey))
+	h.Write(ip.To16())
+	h.Write([]byte(ua))
 
-	// 35bits = 25 + 10
-	v := uint64(h1&0x1FFFFFF)<<10 | uint64(h2&0x3FF)
+	// 35bits
+	v := binary.BigEndian.Uint64(h.Sum(nil)) & 0x7FFFFFFFF
 
 	const base58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 	res := make([]byte, 4, 8)
@@ -157,4 +161,37 @@ func ipuid(ip net.IP, ua string) string {
 	}
 	copy(res[:4], wordDict[v%uint64(len(wordDict))])
 	return *(*string)(unsafe.Pointer(&res))
+}
+
+func (c Ctx) isAdmin() bool {
+	if ck, _ := c.Cookie("admin"); ck == nil || ck.Value != onlineKeyhash {
+		return false
+	}
+	return true
+}
+
+func hmacHex(v string) string {
+	h := hmac.New(sha1.New, []byte(*onlineKey))
+	h.Write([]byte(v))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+var cdMap sync.Map
+
+func (c Ctx) CheckIP() (ok bool) {
+	var ip [16]byte
+	copy(ip[:], c.IP)
+	_, exist := cdMap.Load(ip)
+	return !exist
+}
+
+func (c Ctx) AddIP() {
+	var ip [16]byte
+	copy(ip[:], c.IP)
+	old, _ := cdMap.Swap(ip, 1)
+	if old != 1 {
+		time.AfterFunc(time.Second*1, func() {
+			cdMap.Delete(ip)
+		})
+	}
 }

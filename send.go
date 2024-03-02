@@ -82,8 +82,14 @@ func handleSend(c Ctx) {
 	var name string
 	var err string
 	if c.Method == "POST" {
-		msg := sanitizeMessage(c.FormValue("msg"))
 		name = sanitizeChannelName(c.FormValue("channel"))
+		msg := sanitizeMessage(c.FormValue("msg"))
+
+		if !c.CheckIP() {
+			err = "Cooling down"
+			goto NO_SEND
+		}
+		c.AddIP()
 
 		tok := c.FormValue("token")
 		if !validateToken(c, tok) {
@@ -126,40 +132,3 @@ NO_SEND:
 		"token": makeToken(c),
 	})
 }
-
-// var cdMap sync.Map
-//
-// type limiter struct {
-// 	ctr    int64
-// 	freeAt int64
-// }
-//
-// func CheckIP(r *http.Request) (ok bool, remains int64) {
-// 	uid := types.IpUserId(r.RemoteIP)
-// 	if v, ok := cdMap.Load(uid); ok {
-// 		rl := v.(*limiter)
-// 		if atomic.AddInt64(&rl.ctr, -1) > 0 {
-// 			return true, 0
-// 		}
-// 		return false, rl.freeAt - clock.Unix()
-// 	}
-// 	return true, 0
-// }
-//
-// func AddIP(r *http.Request) {
-// 	uid := types.IpUserId(r.RemoteIP)
-// 	if _, ok := cdMap.Load(uid); ok {
-// 		return
-// 	}
-//
-// 	var sec, ctr int64 = 10, 3
-//
-// 	cdMap.Store(uid, &limiter{
-// 		ctr:    ctr,
-// 		freeAt: clock.Unix() + sec,
-// 	})
-//
-// 	time.AfterFunc(time.Second*time.Duration(sec), func() {
-// 		cdMap.Delete(uid)
-// 	})
-// }

@@ -3,7 +3,10 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"html"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -13,13 +16,28 @@ func handleIndex(c Ctx) {
 	name := sanitizeChannelName(c.Query.Get("channel"))
 	if name != "" {
 		if c.Query.Get("randomize") != "" {
-			var tmp [3]byte
+			var tmp [6]byte
 			rand.Read(tmp[:])
 			name += "--" + time.Now().Format("0102") + base64.RawURLEncoding.EncodeToString(tmp[:])
 		}
 
-		c.Uid = c.Query.Get("uid")
+		var pwd string
+		c.Uid, pwd, _ = strings.Cut(c.Query.Get("uid"), "!")
+		if uid := strings.ToLower(c.Uid); strings.Contains(uid, "root") || strings.Contains(uid, "admin") {
+			if !c.isAdmin() {
+				c.Uid = ""
+			}
+		}
 		c.SetUidCookie()
+		if pwd := hmacHex(pwd); pwd == onlineKeyhash {
+			http.SetCookie(c.ResponseWriter, &http.Cookie{
+				Name:     "admin",
+				Value:    pwd,
+				Expires:  time.Now().AddDate(0, 0, 3),
+				HttpOnly: true,
+				Path:     "/",
+			})
+		}
 		c.Query.Del("channel")
 		c.Query.Del("uid")
 		c.Redirect(302, "/"+name+"?"+c.Query.Encode())
@@ -64,6 +82,58 @@ func handleIndex(c Ctx) {
 			"width2": width2,
 		})
 	}
+}
+
+func handleLink(c Ctx) {
+	name := sanitizeChannelName(c.URL.Path[7:])
+	idx, _ := strconv.ParseInt(c.Query.Get("link"), 16, 64)
+
+	var links []string
+	var link string
+
+	if ch, ok := findChannel(name); ok {
+		ch.mu.Lock()
+		links = ch.links
+		ch.mu.Unlock()
+		if 0 <= idx && int(idx) < len(ch.links) {
+			link = links[idx]
+		}
+	}
+
+	if link == "" {
+		c.ResponseWriter.Header().Add("Content-Type", "text/html")
+		if len(links) > 0 {
+			c.Printf(`
+            <p>
+            Link %x doesn't exist in the current channel.<br>
+            Here are currently available links on screen:<br>
+            `, idx)
+			for i := 0; i < 16 && i < len(links); i++ {
+				u := html.EscapeString(links[i])
+				c.Printf(`%x: <a href="%s">%s</a><br>`, i, u, u)
+			}
+		} else {
+			c.Printf(`<p>This channel doesn't have any links. 
+                New link appeared on chat screen will be assigned a tag, so you know which to open.
+                </p>`)
+		}
+	} else {
+		c.Redirect(302, link)
+	}
+}
+
+func handlePing(c Ctx) {
+	name := sanitizeChannelName(c.URL.Path[7:])
+	if ch, ok := findChannel(name); ok {
+		ch.mu.Lock()
+		if arr := ch.onlines[c.Uid]; len(arr) > 0 {
+			u := arr[len(arr)-1]
+			u.timeout.Reset(pingTimeout)
+		}
+		ch.mu.Unlock()
+	}
+	c.WriteHeader(200)
+	c.Write([]byte(`<html><meta http-equiv="refresh" content="10">`))
 }
 
 func sanitizeChannelName(in string) string {

@@ -2,12 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/hex"
 	"flag"
-	"html"
 	"io"
+	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +22,7 @@ import (
 
 	"github.com/coyove/bbolt"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/image/font/opentype"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -26,6 +33,12 @@ var world struct {
 	totalUsers atomic.Int64
 	store      *bbolt.DB
 }
+
+var (
+	domain        = flag.String("d", "", "production")
+	onlineKey     = flag.String("k", "coyove", "production key")
+	onlineKeyhash string
+)
 
 func purgeWorld() {
 	world.Lock()
@@ -40,6 +53,7 @@ func purgeWorld() {
 		}
 	}
 	world.Unlock()
+
 	time.AfterFunc(time.Minute, purgeWorld)
 }
 
@@ -62,6 +76,7 @@ func main() {
 	logrus.SetFormatter(lf)
 	logrus.SetOutput(lf.out)
 	logrus.SetReportCaller(true)
+	onlineKeyhash = hmacHex(*onlineKey)
 
 	var err error
 	drawFont, err = opentype.Parse(fontData)
@@ -79,86 +94,10 @@ func main() {
 
 	purgeWorld()
 
-	// room := NewChannel("test")
-	// world.channels[room.Name] = room
-	// go func() {
-	// 	for true {
-	// 		msg := "Α	Β	Γ	Δ	Ε	Ζ	Η	Θ	Ι	Κ	Λ	Μ	Ν	Ξ	Ο	Π	Ρ	Σ	Τ	Υ	Φ	Χ	Ψ"
-	// 		for i, c := 0, rand.Intn(2)+2; i < c; i++ {
-	// 			msg += "\n" + strconv.Itoa(i) + " "
-	// 			for ii, c := 0, rand.Intn(20)+20; ii < c; ii++ {
-	// 				msg += string(rune(rand.Intn(60000)) + 100)
-	// 			}
-	// 		}
-	// 		if rand.Intn(3) == 1 {
-	// 			msg = "1"
-	// 		}
-	// 		room.Append(Message{
-	// 			From:     "coyove",
-	// 			UnixTime: time.Now().Unix(),
-	// 			Text:     msg,
-	// 		})
-	// 		room.Refresh(-1)
-	// 		time.Sleep(time.Second * 2)
-	// 	}
-	// }()
-
 	handle("/", handleIndex)
-
 	handle("/~send/", handleSend)
-
-	handle("/~ping/", func(c Ctx) {
-		name := sanitizeChannelName(c.URL.Path[7:])
-		if ch, ok := findChannel(name); ok {
-			ch.mu.Lock()
-			if arr := ch.onlines[c.Uid]; len(arr) > 0 {
-				u := arr[len(arr)-1]
-				u.timeout.Reset(pingTimeout)
-			}
-			ch.mu.Unlock()
-		}
-		c.WriteHeader(200)
-		c.Write([]byte(`<html><meta http-equiv="refresh" content="10">`))
-	})
-
-	handle("/~link/", func(c Ctx) {
-		name := sanitizeChannelName(c.URL.Path[7:])
-		idx, _ := strconv.ParseInt(c.Query.Get("link"), 16, 64)
-
-		var links []string
-		var link string
-
-		if ch, ok := findChannel(name); ok {
-			ch.mu.Lock()
-			links = ch.links
-			ch.mu.Unlock()
-			if 0 <= idx && int(idx) < len(ch.links) {
-				link = links[idx]
-			}
-		}
-
-		if link == "" {
-			c.ResponseWriter.Header().Add("Content-Type", "text/html")
-			if len(links) > 0 {
-				c.Printf(`
-            <p>
-            Link %x doesn't exist in the current channel.<br>
-            Here are currently available links on screen:<br>
-            `, idx)
-				for i := 0; i < 16 && i < len(links); i++ {
-					u := html.EscapeString(links[i])
-					c.Printf(`%x: <a href="%s">%s</a><br>`, i, u, u)
-				}
-			} else {
-				c.Printf(`<p>This channel doesn't have any links. 
-                New link appeared on chat screen will be assigned a tag, so you know which to open.
-                </p>`)
-			}
-		} else {
-			c.Redirect(302, link)
-		}
-	})
-
+	handle("/~ping/", handlePing)
+	handle("/~link/", handleLink)
 	handle("/~stream", func(c Ctx) {
 		name := c.Query.Get("name")
 		if name == "" {
@@ -198,10 +137,61 @@ func main() {
 		c.ResponseWriter.Write(buf)
 	})
 
+	pkey := hex.EncodeToString(randBytes(10))
+	http.Handle("/~"+pkey+"/debug/pprof/", http.StripPrefix("/~"+pkey, http.HandlerFunc(pprof.Index)))
+	handle("/~stats", func(c Ctx) {
+		if !c.isAdmin() {
+			c.WriteHeader(400)
+			return
+		}
+
+		m := runtime.MemStats{}
+		runtime.ReadMemStats(&m)
+
+		stats := world.store.Stats()
+
+		out, _ := exec.Command("uptime").Output()
+
+		c.ResponseWriter.Header().Add("Content-Type", "text/html")
+		c.Printf(`
+<p>load: %s</p>
+<p>mem: %.1fM</p>
+<p>disk: %.1fM</p>
+<p>freepage: %d</p>
+<a href="/~%s/debug/pprof/">pprof</a>
+        `,
+			out,
+			float64(m.HeapInuse)/1024/1024,
+			float64(world.store.Size())/1024/1024,
+			stats.FreePageN+stats.PendingPageN,
+			pkey,
+		)
+	})
+
 	addr := ":8888"
 	srv := http.Server{
-		Addr: addr,
+		Addr:     addr,
+		ErrorLog: log.New(lf, "", 0),
 	}
+
+	if *domain != "" {
+		autocertManager := autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(*domain),
+			Cache:      &certCache{},
+		}
+		go func() {
+			logrus.Infof("serving autocert for %s", *domain)
+			logrus.Fatal(http.ListenAndServe(":http", autocertManager.HTTPHandler(nil)))
+		}()
+
+		addr = ":443"
+		srv.Addr = addr
+		srv.TLSConfig = &tls.Config{
+			GetCertificate: autocertManager.GetCertificate,
+		}
+	}
+
 	logrus.Infof("serving at %v", addr)
 	logrus.Fatal(srv.ListenAndServe())
 }
@@ -244,4 +234,45 @@ func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	buf.WriteString(entry.Message)
 	buf.WriteByte('\n')
 	return buf.Bytes(), nil
+}
+
+type certCache struct{}
+
+func (cc *certCache) Get(ctx context.Context, key string) ([]byte, error) {
+	tx, err := world.store.Begin(false)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	bk := tx.Bucket([]byte("cert"))
+	if bk == nil {
+		return nil, autocert.ErrCacheMiss
+	}
+	v := bk.Get([]byte(key))
+	if len(v) == 0 {
+		return nil, autocert.ErrCacheMiss
+	}
+	return v, nil
+}
+
+func (cc *certCache) Put(ctx context.Context, key string, data []byte) error {
+	tx, err := world.store.Begin(true)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	bk, _ := tx.CreateBucketIfNotExists([]byte("cert"))
+	bk.Put([]byte(key), data)
+	return tx.Commit()
+}
+
+func (cc *certCache) Delete(ctx context.Context, key string) error {
+	tx, err := world.store.Begin(true)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	bk, _ := tx.CreateBucketIfNotExists([]byte("cert"))
+	bk.Delete([]byte(key))
+	return tx.Commit()
 }

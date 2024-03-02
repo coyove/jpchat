@@ -184,7 +184,11 @@ func (ch *Channel) Refresh(q int) {
 		for _, waiter := range arr {
 		EXHAUST:
 			select {
-			case <-waiter.recv:
+			case note := <-waiter.recv:
+				if note.timeout || note.kicked {
+					waiter.recv <- note
+					continue
+				}
 				goto EXHAUST
 			default:
 			}
