@@ -88,6 +88,7 @@ func handleSend(c Ctx) {
 		tok := c.FormValue("token")
 		if !validateToken(c, tok) {
 			logrus.Infof("bad token: %s", tok)
+			err = "Invalid session, please reload"
 			goto NO_SEND
 		}
 

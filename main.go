@@ -43,6 +43,13 @@ func purgeWorld() {
 	time.AfterFunc(time.Minute, purgeWorld)
 }
 
+func findChannel(name string) (*Channel, bool) {
+	world.Lock()
+	ch, ok := world.channels[name]
+	world.Unlock()
+	return ch, ok
+}
+
 func main() {
 	flag.Parse()
 	lf := &logFormatter{io.MultiWriter(os.Stdout, &lumberjack.Logger{
@@ -100,16 +107,28 @@ func main() {
 
 	handle("/~send/", handleSend)
 
+	handle("/~ping/", func(c Ctx) {
+		name := sanitizeChannelName(c.URL.Path[7:])
+		if ch, ok := findChannel(name); ok {
+			ch.mu.Lock()
+			if arr := ch.onlines[c.Uid]; len(arr) > 0 {
+				u := arr[len(arr)-1]
+				u.timeout.Reset(pingTimeout)
+			}
+			ch.mu.Unlock()
+		}
+		c.WriteHeader(200)
+		c.Write([]byte(`<html><meta http-equiv="refresh" content="10">`))
+	})
+
 	handle("/~link/", func(c Ctx) {
 		name := sanitizeChannelName(c.URL.Path[7:])
 		idx, _ := strconv.ParseInt(c.Query.Get("link"), 16, 64)
-		world.Lock()
-		ch, ok := world.channels[name]
-		world.Unlock()
 
 		var links []string
 		var link string
-		if ok {
+
+		if ch, ok := findChannel(name); ok {
 			ch.mu.Lock()
 			links = ch.links
 			ch.mu.Unlock()

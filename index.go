@@ -18,6 +18,8 @@ func handleIndex(c Ctx) {
 			name += "--" + time.Now().Format("0102") + base64.RawURLEncoding.EncodeToString(tmp[:])
 		}
 
+		c.Uid = c.Query.Get("uid")
+		c.SetUidCookie()
 		c.Query.Del("channel")
 		c.Query.Del("uid")
 		c.Redirect(302, "/"+name+"?"+c.Query.Encode())

@@ -9,6 +9,7 @@ import (
 	"image/draw"
 	"math/rand"
 	"net"
+	"net/http"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -22,21 +23,27 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+const boundary = "\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"
+
+const pingTimeout = time.Second * 30
+
 const screenHeight = 960
 
 var screenWidths = [...]int{400, 800}
 
 type channelNotify struct {
-	data   []byte
-	kicked bool
+	data    []byte
+	kicked  bool
+	timeout bool
 }
 
 type channelOnline struct {
-	uid    string
-	si     int
-	recv   chan channelNotify
-	ip     net.IP
-	joined int64
+	uid     string
+	si      int
+	recv    chan channelNotify
+	ip      net.IP
+	joined  int64
+	timeout *time.Timer
 }
 
 type Channel struct {
@@ -208,14 +215,17 @@ func (ch *Channel) Join(uid string, c Ctx) {
 			for _, oldState := range arr {
 				oldState.recv <- channelNotify{
 					kicked: true,
-					data:   makeErrorImage(screenWidths[oldState.si], screenHeight, "Chat has been opened elsewhere"),
+					data: makeErrorImage(screenWidths[oldState.si], screenHeight,
+						"Chat has been opened elsewhere"),
 				}
 			}
 			switching = true
 		} else {
 			ch.mu.Unlock()
+
 			c.ResponseWriter.Header().Add("Content-Type", "image/jpeg")
-			c.Write(makeErrorImage(400+400*si, 960, fmt.Sprintf("'%s' already exists in this channel", uid)))
+			c.Write(makeErrorImage(screenWidths[si], screenHeight,
+				fmt.Sprintf("'%s' already exists in this channel", uid)))
 			logrus.Infof("[Channel %s] %s can't join due to same nickname %s", ch.Name, c.RemoteAddr, uid)
 			return
 		}
@@ -228,9 +238,13 @@ func (ch *Channel) Join(uid string, c Ctx) {
 		joined: time.Now().Unix(),
 	}
 	ch.onlines[uid] = append(ch.onlines[uid], state)
+
 	if last := ch.lastImgData[si]; len(last) > 0 {
 		state.recv <- channelNotify{data: last}
 	}
+	state.timeout = time.AfterFunc(pingTimeout, func() {
+		state.recv <- channelNotify{timeout: true}
+	})
 	ch.mu.Unlock()
 
 	if !switching {
@@ -238,22 +252,42 @@ func (ch *Channel) Join(uid string, c Ctx) {
 	}
 	ch.Refresh(-1)
 
-	c.ResponseWriter.Header().Add("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-	c.WriteHeader(200)
-	const boundary = "\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"
+	hijack, _ := c.ResponseWriter.(http.Hijacker)
+	if hijack == nil {
+		c.Write([]byte("bad protocol"))
+		return
+	}
+
+	conn, _, err := hijack.Hijack()
+	if err != nil {
+		logrus.Errorf("hijacking: %v", err)
+		c.Write([]byte("bad protocol"))
+		return
+	}
+
+	defer conn.Close()
+
+	conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"))
+	// c.ResponseWriter.Header().Add("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+	// c.WriteHeader(200)
 
 	var note channelNotify
 RECV:
 	for note = range state.recv {
 		for i := 0; i < 4; i++ {
-			c.Write([]byte(boundary))
-			if _, err := c.Write(note.data); err != nil {
+			conn.SetWriteDeadline(time.Now().Add(time.Second * 5))
+			conn.Write([]byte(boundary))
+			if _, err := conn.Write(note.data); err != nil {
 				logrus.Errorf("stream image data to %v: %v", c.RemoteAddr, err)
 				break RECV
 			}
 		}
 		if note.kicked {
 			logrus.Infof("[Channel %s] %s has switched window, old one lived %vs", ch.Name, uid, time.Now().Unix()-state.joined)
+			break
+		}
+		if note.timeout {
+			logrus.Infof("[Channel %s] %s has timed out, lived %vs", ch.Name, uid, time.Now().Unix()-state.joined)
 			break
 		}
 	}

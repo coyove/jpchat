@@ -139,10 +139,6 @@ td.small {
     font-size: 100%;
 }
 
-.button-div.icon {
-    padding-left: 0.5rem;
-}
-
 .button-div:not(.selected):hover:before {
     content: ' ';
     display: block;

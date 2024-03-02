@@ -14,14 +14,13 @@
                 <span class=icon-hashtag></span>
             </td>
             <td>
-                <input placeholder=Channel class=text name=channel>
-            </td>
-        </tr>
-        <tr>
-            <td class=small></td>
-            <td style='font-size: 90%'>
-                <input id=randomize{{index . 1}} type=checkbox name=randomize>
-                <label for=randomize{{index . 1}}>Channel name&nbsp;+&nbsp;</label>
+                <div style='display: flex;align-items:center'>
+                    <input style='flex-grow:1' placeholder='Channel name' class=text name=channel>
+                    <div>
+                        <input id=randomize{{index . 1}} type=checkbox name=randomize>
+                        <label for=randomize{{index . 1}}></label>
+                    </div>
+                </div>
             </td>
         </tr>
         <tr>
@@ -29,7 +28,7 @@
                 <div style='display: flex; justify-content: center'>
                     <input type=hidden value={{index . 1}} name=w>
                     <button type=submit class='button-div icon'>
-                        <span class=icon-rocket></span>&nbsp;Join
+                        <span class=icon-rocket></span>&emsp;Join&emsp;
                     </button>
                 </div>
             </td>

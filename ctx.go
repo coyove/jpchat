@@ -93,7 +93,7 @@ func handle(p string, f func(Ctx)) {
 			Query:          r.URL.Query(),
 		}
 
-		ck, _ := r.Cookie("uid")
+		ck, _ := r.Cookie("uid2")
 		if ck != nil {
 			v, err := base64.URLEncoding.DecodeString(ck.Value)
 			if err != nil {
@@ -102,21 +102,27 @@ func handle(p string, f func(Ctx)) {
 				c.Uid = string(v)
 			}
 		}
-		if c.Uid == "" {
-			c.Uid = ipuid(c.IP, r.UserAgent())
-		} else {
-			c.Uid = sanitizeStrict(c.Uid, 20)
-		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     "uid",
-			Value:    base64.URLEncoding.EncodeToString([]byte(c.Uid)),
-			Expires:  time.Now().AddDate(1, 0, 0),
-			HttpOnly: true,
-		})
 
+		c.SetUidCookie()
 		c.ResponseWriter.Header().Add("Content-Security-Policy", "script-src none")
 
 		f(c)
+	})
+}
+
+func (c Ctx) SetUidCookie() {
+	if c.Uid == "" {
+		c.Uid = ipuid(c.IP, c.UserAgent())
+	} else {
+		c.Uid = sanitizeStrict(c.Uid, 20)
+	}
+	c.ResponseWriter.Header().Del("Set-Cookie")
+	http.SetCookie(c.ResponseWriter, &http.Cookie{
+		Name:     "uid2",
+		Value:    base64.URLEncoding.EncodeToString([]byte(c.Uid)),
+		Expires:  time.Now().AddDate(1, 0, 0),
+		HttpOnly: true,
+		Path:     "/",
 	})
 }
 
