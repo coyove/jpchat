@@ -1,0 +1,76 @@
+{{template "header.html" .}}
+
+<div style="max-width: {{.width}}px" class=channel-view>
+    <title>#{{.name}}</title>
+    <div style="display: flex; align-items: center; padding: 0.25rem">
+        <div><a class='tag-edit-button icon-left-open-1' href='/'></a></div>
+        <div style='text-align:center; flex-grow: 1; margin: 0 0.25rem; white-space: nowrap; overflow: hidden'>
+            <span class='icon-hashtag'>&nbsp;{{.name}}</span>
+        </div> 
+        <div><a class='tag-edit-button icon-resize-{{if eq .width 400}}full{{else}}small{{end}}' href='?name={{.name}}&w={{.width2}}'></a></div>
+    </div>
+    <div style="
+        position: relative;
+        flex-grow: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: repeating-linear-gradient(
+          45deg,
+          rgba(0, 0, 0, 0.02),
+          rgba(0, 0, 0, 0.02) 20px,
+          rgba(0, 0, 0, 0.05) 20px,
+          rgba(0, 0, 0, 0.05) 40px
+        );
+        overflow: hidden">
+        <img tabindex="-1"
+             alt="Please reload"
+             draggable="false"
+             src="/~stream?name={{.name}}&screen={{.width}}"
+             style="position: absolute; display: block; width: 100%; left: 0; bottom: 0; z-index: 1"/>
+        <div class=lds-dual-ring style="z-index: 0"></div>
+    </div>
+    <div style='position:relative'>
+        <div style="position:absolute;left:0.25rem;top: 50%; transform: translateY(-50%); z-index:10">
+            <div class="tag-dropdown">
+                <span class='tag-edit-button icon-link'></span>
+                <div class="tag-dropdown-menu"> 
+                    <div class="tag-dropdown-item">
+                        <a href='/~link/{{.name}}?link=0' target=_blank><span>0</span></a>
+                        <a href='/~link/{{.name}}?link=1' target=_blank><span>1</span></a>
+                        <a href='/~link/{{.name}}?link=2' target=_blank><span>2</span></a>
+                        <a href='/~link/{{.name}}?link=3' target=_blank><span>3</span></a>
+                    </div>
+                    <div class="tag-dropdown-item">
+                        <a href='/~link/{{.name}}?link=4' target=_blank><span>4</span></a>
+                        <a href='/~link/{{.name}}?link=5' target=_blank><span>5</span></a>
+                        <a href='/~link/{{.name}}?link=6' target=_blank><span>6</span></a>
+                        <a href='/~link/{{.name}}?link=7' target=_blank><span>7</span></a>
+                    </div>
+                    <div class="tag-dropdown-item">
+                        <a href='/~link/{{.name}}?link=8' target=_blank><span>8</span></a>
+                        <a href='/~link/{{.name}}?link=9' target=_blank><span>9</span></a>
+                        <a href='/~link/{{.name}}?link=a' target=_blank><span>a</span></a>
+                        <a href='/~link/{{.name}}?link=b' target=_blank><span>b</span></a>
+                    </div>
+                    <div class="tag-dropdown-item">
+                        <a href='/~link/{{.name}}?link=c' target=_blank><span>c</span></a>
+                        <a href='/~link/{{.name}}?link=d' target=_blank><span>d</span></a>
+                        <a href='/~link/{{.name}}?link=e' target=_blank><span>e</span></a>
+                        <a href='/~link/{{.name}}?link=f' target=_blank><span>f</span></a>
+                    </div>
+                    <div class="tag-dropdown-item">
+                        <div style='flex-basis: 100%;font-weight:bold;font-size: 80%;padding:0.5rem;text-align:center'>Open link</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <input type=checkbox style='display: none' id=switch-input>
+        <label for=switch-input multi class='tag-edit-button icon-article'></label>
+        <label for=switch-input single class='tag-edit-button icon-comment'></label>
+        <iframe multi style="width:100%; border: none; height: 3rem" scrolling="no" src="/~send/{{.name}}" ></iframe>
+        <iframe single style="width:100%; border: none; height: 6rem" scrolling="no" src="/~send/{{.name}}?multi=1" ></iframe>
+    </div>
+</div>
+
+{{template "footer.html" .}}

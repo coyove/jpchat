@@ -1,0 +1,41 @@
+<div class='{{if eq (index . 1) 400}}narrow{{else}}wide{{end}}'>
+<form action='/'>
+    <table style="width: 100%;max-width:300px;margin:0 auto;">
+        <tr>
+            <td class=small style='padding:0'>
+                <span class=icon-user-secret></span>
+            </td>
+            <td>
+                <input placeholder=Nickname class=text name=uid value='{{index . 0}}'>
+            </td>
+        </tr> 
+        <tr>
+            <td class=small style='padding:0'>
+                <span class=icon-hashtag></span>
+            </td>
+            <td>
+                <input placeholder=Channel class=text name=channel>
+            </td>
+        </tr>
+        <tr>
+            <td class=small></td>
+            <td>
+                <label>
+                    <input type=checkbox name=randomize>
+                    Channel name random suffix
+                </label>
+            </td>
+        </tr>
+        <tr>
+            <td colspan=2>
+                <div style='display: flex; justify-content: center'>
+                    <input type=hidden value={{index . 1}} name=w>
+                    <button type=submit class='button-div icon'>
+                        <span class=icon-rocket></span>&nbsp;Join
+                    </button>
+                </div>
+            </td>
+        </tr>
+    </table>
+</form>
+</div>

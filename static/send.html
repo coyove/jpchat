@@ -1,0 +1,30 @@
+{{template "header.html" .}}
+<style>
+textarea::-webkit-scrollbar { display: none }
+</style>
+<div style='padding: 0.5rem 0.25rem;height: 100%;background: #eaebec; position: relative'>
+    {{if .err}}
+    <div style='position:absolute;width:100%;top:0;left:0;background:#e5737380;padding:0.25rem;z-index: 100;text-align:center'>
+        {{.err}}
+    </div>
+    {{end}}
+
+    <form method="POST">
+        <div style="position:relative;height: 100%;display:flex; align-items:center; overflow:hidden;border-radius: 5px; padding:0.25rem;margin-left:4.25rem;background:white"> 
+            {{if .multi}}
+            <textarea {{if .err}}readonly{{end}} placeholder='Multiline...' name=msg autofocus tabindex=0 style="font:inherit;border:none;width: 100%;outline:none;resize:none;height: 100%"></textarea>
+            <button type=submit default class='tag-edit-button icon-paper-plane' style='color: #2196f3; position:absolute; font-size:100%; right: .25rem; top:50%;transform:translateY(-50%)'>
+            </button>
+            {{else}}
+            <input {{if .err}}readonly{{end}} name=msg placeholder='Enter to send' autofocus tabindex=0 style="font:inherit;border:none;width: 100%;outline:none">
+            <div style='color: rgba(0,0,0,0.33); position:absolute; right: 0.5rem; top: 0; height: 100%;display:flex;align-items:center;font-size:80%'>
+                <span class=icon-user-secret> {{.uid}}</span>
+            </div>
+            <input type=submit default value=send style='display:none'>
+            {{end}}
+        </div>
+        <input type=hidden name=channel value={{.name}}>
+        <input type=hidden name=token value={{.token}}>
+    </form>
+</div>
+{{template "footer.html" .}}

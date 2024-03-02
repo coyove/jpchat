@@ -1,0 +1,53 @@
+{{template "header.html" .}}
+<title>JPChat</title>
+
+<style>
+.wide { display: none }
+.narrow { display: initial }
+@media screen and (min-width: 600px) {
+    .wide { display: initial }
+    .narrow { display: none }
+}
+
+input.text {
+    outline:none;
+    font-family:inherit;
+    flex-grow: 1;
+    background: white;
+    min-width: 0;
+    padding: 0.5rem;
+    border: none;
+    height: 2rem;
+    border-radius: 1rem;
+    width: 100%;
+    box-shadow: 0 0 1px #aaa;
+}
+</style>
+
+<div style="margin: 0 auto; width: 100%; max-width: 400px;display: flex;flex-direction:column;justify-content: center; height: 100%;">
+    <div style='background:#f5f6f7;padding:0.5rem 1rem;box-shadow:0 0 12px 0px #aaa'>
+    <p style='text-align:center'>
+    JPChat is a web-based online chatting service with zero javascript and telemetry.
+    </p>
+    <p style='font-size: 80%; color: #677; text-align:center'>
+    Only 10~20 messages can be displayed due to the fixed screen height (960px).
+    If you missed it, you missed it.
+    </p>
+
+    {{range .widths}}
+    {{template "join.html" .}}
+    {{end}}
+
+    <p>
+    {{.totalCh}} channels, {{.activeCh}} active channels<br>
+    {{.totalUser}} online users
+    </p>
+
+    <p>
+        <a class=narrow href="/report?w=400">#report</a>
+        <a class=wide href="/report?w=800">#report</a> abuse.
+    </p>
+    </div>
+</div>
+
+{{template "footer.html" .}}
