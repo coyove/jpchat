@@ -22,12 +22,56 @@ input.text {
     width: 100%;
     box-shadow: 0 0 1px #aaa;
 }
+
+input[type=checkbox] + label {
+    display: flex;
+    cursor: pointer;
+    padding: 0.25rem;
+    user-select: none;
+}
+
+input[type=checkbox] {
+    display: none;
+}
+
+input[type=checkbox] + label:before {
+    content: "\1f3b2";
+    display: inline-block;
+    height: 1rem;
+    line-height: 1rem;
+    margin-right: 0.25rem;
+    opacity: 0.2;
+    text-align: center;
+    font-size: 120%;
+}
+
+input[type=checkbox] + label:after {
+    content: 'random suffix';
+    white-space: normal;
+}
+
+input[type=checkbox]:checked + label:before {
+    opacity: 1;
+}
+
+input[type=checkbox]:checked + label:after {
+    content: ' ';
+    animation: textrotate 1.5s linear infinite;
+}
+
+@keyframes textrotate{
+    {{range (randomChannelSuffix 10)}}
+    {{index . 0}}%{
+        content: '{{index . 1}}';
+    }
+    {{end}}
+}
 </style>
 
 <div style="margin: 0 auto; width: 100%; max-width: 400px;display: flex;flex-direction:column;justify-content: center; height: 100%;">
     <div style='background:#f5f6f7;padding:0.5rem 1rem;box-shadow:0 0 12px 0px #aaa'>
     <p style='text-align:center'>
-    <a href='https://github.com/coyove/jpchat'>JPChat</a> is a web-based online chatting service with zero javascript and telemetry.
+    <a href='https://github.com/coyove/jpchat'>JPChat</a> is a web online chatting service with zero javascript and telemetry.
     </p>
     <p style='font-size: 80%; color: #677; text-align:center'>
     Only 10~20 messages can be displayed due to the fixed screen height (960px).

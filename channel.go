@@ -297,8 +297,8 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 	const contentLeft = margin * 2.5
 
 	// m := face.Metrics()
-	barHeight := lineHeight * 3 / 2
 	// descent := m.Descent.Round()
+	barHeight := lineHeight * 3 / 2
 
 	y := h - margin*2 - barHeight
 
@@ -392,6 +392,8 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 					})
 					x += fixed.I(emojiAdvance)
 					i += len(cand.text)
+				} else if _, _, ok := d.Face.GlyphBounds(c); !ok && c < 0x10000 {
+					x += fixed.I(18)
 				} else {
 					advance, _ := d.Face.GlyphAdvance(c)
 					x += advance

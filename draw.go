@@ -31,13 +31,15 @@ const (
 
 var (
 	userIconData, _ = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAADpSURBVDiNndMtS0RBFMbx3xWECxb7BoMYREwa9voZjBaTwbzRD2PyE1gE2WASbBsFk8UXENG2ICbH4Fy8e2fu1d0DTzlnnv/MnDMjhKAtbOAC73jEKVazazPmdUwRWrpD+R/AecZc66S9fkkaw0yus5YDTHsASS0HuOwBpLVMD1Ywkd7/LDeFIppAURQltnGPQ+zhA2NcYRO3IYTP5ASo8Bx3e8UIa1GjmAt4wu7MGFHiJXPsLj1guQk4mMNca7/5DqqezndFxe8YBwsABk3A2wKAH0/swY75e7A185lwjJs/TF+4xlHt+wZsKfCMyXdZ6AAAAABJRU5ErkJggg==")
-
-	userIcon, _ = png.Decode(bytes.NewReader(userIconData))
+	userIcon, _     = png.Decode(bytes.NewReader(userIconData))
 
 	//go:embed embedded/badge.png
 	badgeIconData []byte
+	badgeIcon, _  = png.Decode(bytes.NewReader(badgeIconData))
 
-	badgeIcon, _ = png.Decode(bytes.NewReader(badgeIconData))
+	//go:embed embedded/unifont.png
+	unifontData []byte
+	unifont, _  = png.Decode(bytes.NewReader(unifontData))
 
 	//go:embed embedded/NotoSansMono.otf
 	fontData []byte
@@ -142,6 +144,17 @@ func DrawStringOmitEmojis(d *font.Drawer, s string) {
 			s = s[len(cand.text):]
 			d.Dot.X += fixed.I(emojiAdvance)
 			prevC = -1
+			continue
+		}
+
+		if _, _, ok := d.Face.GlyphBounds(c); !ok && c < 0x10000 {
+			xx, yy := d.Dot.X.Round()+1, d.Dot.Y.Round()-14
+			for i := 0; i < 2; i++ {
+				draw.DrawMask(d.Dst, image.Rect(xx+i, yy, xx+i+16, yy+16),
+					d.Src, image.Point{},
+					unifont, image.Point{int(c) % 256 * 16, int(c) / 256 * 16}, draw.Over)
+			}
+			d.Dot.X += fixed.I(18)
 			continue
 		}
 

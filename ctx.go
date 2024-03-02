@@ -3,9 +3,11 @@ package main
 import (
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"hash/crc32"
 	"html/template"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,6 +30,19 @@ var uuid = strconv.Itoa(int(time.Now().Unix()))
 var httpTemplates = template.Must(template.New("ts").Funcs(template.FuncMap{
 	"ServeUUID": func() string {
 		return uuid
+	},
+	"randomChannelSuffix": func(n int) [][2]any {
+		res := make([][2]any, n)
+		for i := range res {
+			tmp := make([]byte, 3)
+			rand.Read(tmp)
+			if i == n-1 {
+				res[i] = [2]any{100, hex.EncodeToString(tmp)}
+			} else {
+				res[i] = [2]any{i * 100 / n, hex.EncodeToString(tmp)}
+			}
+		}
+		return res
 	},
 }).ParseFS(httpStaticPages, "static/*.*"))
 
@@ -98,6 +113,8 @@ func handle(p string, f func(Ctx)) {
 			Expires:  time.Now().AddDate(1, 0, 0),
 			HttpOnly: true,
 		})
+
+		c.ResponseWriter.Header().Add("Content-Security-Policy", "script-src none")
 
 		f(c)
 	})

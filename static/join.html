@@ -19,11 +19,9 @@
         </tr>
         <tr>
             <td class=small></td>
-            <td>
-                <label>
-                    <input type=checkbox name=randomize>
-                    Channel name random suffix
-                </label>
+            <td style='font-size: 90%'>
+                <input id=randomize{{index . 1}} type=checkbox name=randomize>
+                <label for=randomize{{index . 1}}>Channel name&nbsp;+&nbsp;</label>
             </td>
         </tr>
         <tr>

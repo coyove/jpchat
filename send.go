@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
+	"sync/atomic"
 	"time"
 
 	"github.com/coyove/sdss/contrib/plru"
@@ -24,14 +26,20 @@ var aesToken = func() cipher.Block {
 	return blk
 }()
 
-var tokenStore = plru.New[uint64, struct{}](60000, plru.Hash.Uint64, nil)
+var tokenStore = plru.New[[12]byte, struct{}](60000, func(v [12]byte) uint64 {
+	h := sha1.Sum(v[:])
+	return binary.BigEndian.Uint64(h[:8])
+}, nil)
+
+var tokenctr atomic.Uint32
 
 func makeToken(c Ctx) string {
 	enc, _ := cipher.NewGCM(aesToken)
 	nonce := randBytes(12)
 	data := sha1.Sum(c.IP)
-	return hex.EncodeToString(enc.Seal(nonce, nonce,
-		binary.BigEndian.AppendUint32(data[:4:8], uint32(time.Now().Unix())), nil))
+	binary.BigEndian.PutUint32(data[4:8], uint32(time.Now().Unix()))
+	binary.BigEndian.PutUint32(data[8:12], tokenctr.Add(1))
+	return hex.EncodeToString(enc.Seal(nonce, nonce, data[:12], nil))
 }
 
 func validateToken(c Ctx, tok string) bool {
@@ -48,21 +56,22 @@ func validateToken(c Ctx, tok string) bool {
 	if err != nil {
 		return false
 	}
-	if len(data) != 8 {
+	if len(data) != 12 {
 		return false
 	}
-	v := binary.BigEndian.Uint64(data)
+	var v [12]byte
+	copy(v[:], data)
 	if _, ok := tokenStore.Get(v); ok {
 		return false
 	}
 	tokenStore.Add(v, struct{}{})
 
 	ipHash := sha1.Sum(c.IP)
-	if binary.BigEndian.Uint32(ipHash[:4]) != uint32(v>>32) {
+	if !bytes.Equal(ipHash[:4], v[:4]) {
 		logrus.Errorf("validate token: mismatch IPs")
 		return false
 	}
-	if uint32(time.Now().Unix())-uint32(v) > 86400 {
+	if uint32(time.Now().Unix())-binary.BigEndian.Uint32(v[4:8]) > 86400 {
 		logrus.Errorf("validate token: too old")
 		return false
 	}
@@ -78,6 +87,7 @@ func handleSend(c Ctx) {
 
 		tok := c.FormValue("token")
 		if !validateToken(c, tok) {
+			logrus.Infof("bad token: %s", tok)
 			goto NO_SEND
 		}
 
