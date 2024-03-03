@@ -113,7 +113,7 @@ func handle(p string, f func(Ctx)) {
 	})
 }
 
-func (c Ctx) SetUidCookie() {
+func (c *Ctx) SetUidCookie() {
 	if c.Uid == "" {
 		c.Uid = ipuid(c.IP, c.UserAgent())
 	} else {
@@ -179,6 +179,9 @@ func hmacHex(v string) string {
 var cdMap sync.Map
 
 func (c Ctx) CheckIP() (ok bool) {
+	if c.isAdmin() {
+		return true
+	}
 	var ip [16]byte
 	copy(ip[:], c.IP)
 	_, exist := cdMap.Load(ip)

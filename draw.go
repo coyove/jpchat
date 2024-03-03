@@ -149,7 +149,7 @@ func DrawStringOmitEmojis(d *font.Drawer, s string) {
 
 		if _, _, ok := d.Face.GlyphBounds(c); !ok && c < 0x10000 {
 			xx, yy := d.Dot.X.Round()+1, d.Dot.Y.Round()-14
-			for i := 0; i < 2; i++ {
+			for i := 0; i < 1; i++ {
 				draw.DrawMask(d.Dst, image.Rect(xx+i, yy, xx+i+16, yy+16),
 					d.Src, image.Point{},
 					unifont, image.Point{int(c) % 256 * 16, int(c) / 256 * 16}, draw.Over)

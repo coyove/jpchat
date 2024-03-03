@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"image"
 	"image/draw"
+	"image/jpeg"
 	"math/rand"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -23,16 +25,17 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-const boundary = "\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"
+const (
+	pingTimeout = time.Second * 30
+	autoRefresh = time.Second * 10
+)
 
-const pingTimeout = time.Second * 30
-
-const screenHeight = 960
-
+var screenHeight = 960
 var screenWidths = [...]int{400, 800}
 
 type channelNotify struct {
 	data    []byte
+	jpeg    bool
 	kicked  bool
 	timeout bool
 }
@@ -52,16 +55,19 @@ type Channel struct {
 
 	mu sync.Mutex
 
-	lastImgData [2][]byte
+	lastImgData [2]channelNotify
 	onlines     map[string][]*channelOnline
 	links       []string
 	lastElapsed int64
 	data        []Message
 	traffic     int64
-	closed      bool
-	autoRefresh *time.Timer
 	idctr       uint64
 	nameHash    uint32
+	closed      bool
+	degradeJPEG bool
+
+	autoRefresh  *time.Timer
+	refreshThrot atomic.Int64
 }
 
 func loadChannel(name string) (*Channel, error) {
@@ -70,7 +76,8 @@ func loadChannel(name string) (*Channel, error) {
 	r.onlines = map[string][]*channelOnline{}
 	r.nameHash = crc32.ChecksumIEEE([]byte(r.Name))
 	r.idctr = rand.Uint64()
-	r.autoRefresh = time.AfterFunc(time.Second*10, r.doAutoRefresh)
+	r.autoRefresh = time.AfterFunc(autoRefresh, r.doAutoRefresh)
+	r.refreshThrot.Store(time.Now().Unix()) // 1 refresh per second
 	r.Refresh(-1)
 
 	tx, err := world.store.Begin(false)
@@ -126,7 +133,7 @@ func (ch *Channel) Append(e Message) error {
 
 	ch.mu.Unlock()
 
-	ch.autoRefresh.Reset(time.Second * 10)
+	ch.autoRefresh.Reset(autoRefresh)
 
 	switch e.Type {
 	case MessageJoin, MessageLeave:
@@ -167,17 +174,30 @@ func (ch *Channel) Refresh(q int) {
 	}
 
 	start := time.Now()
-	var outs [][]byte
+	if old := ch.refreshThrot.Load(); start.Unix() != old && ch.refreshThrot.CompareAndSwap(old, start.Unix()) {
+		// Proceed
+	} else {
+		logrus.Infof("[Channel %s] refresh too quickly, delay on purpose", ch.Name)
+		ch.autoRefresh.Reset(time.Second)
+		return
+	}
+
+	var outs []channelNotify
 	for i, w := range screenWidths {
 		out := bytes.Buffer{}
-		webp.Encode(&out, ch.render(i, w, screenHeight), &webp.Options{Quality: float32(q)})
-		outs = append(outs, out.Bytes())
+		if ch.lastElapsed > 600 || ch.degradeJPEG {
+			jpeg.Encode(&out, ch.render(i, w, screenHeight), &jpeg.Options{Quality: q})
+			ch.degradeJPEG = true
+		} else {
+			webp.Encode(&out, ch.render(i, w, screenHeight), &webp.Options{Quality: float32(q)})
+		}
+		outs = append(outs, channelNotify{data: out.Bytes(), jpeg: ch.degradeJPEG})
 	}
 
 	ch.mu.Lock()
-	for i, data := range outs {
-		ch.traffic += int64(len(data))
-		ch.lastImgData[i] = data
+	for i, note := range outs {
+		ch.traffic += int64(len(note.data))
+		ch.lastImgData[i] = note
 	}
 
 	for _, arr := range ch.onlines {
@@ -194,7 +214,7 @@ func (ch *Channel) Refresh(q int) {
 			}
 
 			select {
-			case waiter.recv <- channelNotify{data: outs[waiter.si]}:
+			case waiter.recv <- channelNotify{data: outs[waiter.si].data}:
 			default:
 			}
 		}
@@ -243,8 +263,8 @@ func (ch *Channel) Join(uid string, c Ctx) {
 	}
 	ch.onlines[uid] = append(ch.onlines[uid], state)
 
-	if last := ch.lastImgData[si]; len(last) > 0 {
-		state.recv <- channelNotify{data: last}
+	if last := ch.lastImgData[si]; len(last.data) > 0 {
+		state.recv <- last
 	}
 	state.timeout = time.AfterFunc(pingTimeout, func() {
 		state.recv <- channelNotify{timeout: true}
@@ -280,7 +300,11 @@ RECV:
 	for note = range state.recv {
 		for i := 0; i < 4; i++ {
 			conn.SetWriteDeadline(time.Now().Add(time.Second * 5))
-			conn.Write([]byte(boundary))
+			if note.jpeg {
+				conn.Write([]byte("\r\n--frame\r\nContent-Type: image/jpeg\r\n\r\n"))
+			} else {
+				conn.Write([]byte("\r\n--frame\r\nContent-Type: image/webp\r\n\r\n"))
+			}
 			if _, err := conn.Write(note.data); err != nil {
 				logrus.Errorf("stream image data to %v: %v", c.RemoteAddr, err)
 				break RECV
@@ -535,8 +559,8 @@ func (ch *Channel) render(si, w, h int) (img *image.RGBA) {
 		d.Dot.X = fixed.I(nx + margin*2)
 		d.DrawString(ts)
 
-		traffic := fmt.Sprintf("%.1ffps %d:%.2fM",
-			1000/float64(ch.lastElapsed), len(ch.lastImgData[si])/1024, float64(ch.traffic)/1024/1024*4)
+		traffic := fmt.Sprintf("%dms %d:%.2fM",
+			ch.lastElapsed, len(ch.lastImgData[si].data)/1024, float64(ch.traffic)/1024/1024*4)
 		tw := d.MeasureString(traffic)
 		d.Dot.X = fixed.I(w-contentLeft) - tw
 		d.DrawString(traffic)
