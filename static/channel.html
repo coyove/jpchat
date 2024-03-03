@@ -68,8 +68,8 @@
         <input type=checkbox style='display: none' id=switch-input>
         <label for=switch-input multi class='tag-edit-button icon-article'></label>
         <label for=switch-input single class='tag-edit-button icon-comment'></label>
-        <iframe multi style="width:100%; border: none; height: 3rem" scrolling="no" src="/~send/{{.name}}" ></iframe>
-        <iframe single style="width:100%; border: none; height: 6rem" scrolling="no" src="/~send/{{.name}}?multi=1" ></iframe>
+        <iframe multi style="width:100%; border: none; height: 3rem" scrolling="no" src="/~send/{{.name}}?width={{.width}}" ></iframe>
+        <iframe single style="width:100%; border: none; height: 6rem" scrolling="no" src="/~send/{{.name}}?width={{.width}}&multi=1" ></iframe>
         <iframe style="display: none" src="/~ping/{{.name}}" ></iframe>
     </div>
 </div>

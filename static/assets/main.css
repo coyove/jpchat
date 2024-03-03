@@ -219,3 +219,37 @@ td.small {
 .tag-dropdown-menu .tag-dropdown-item a:hover {
     background: rgba(0, 0, 0, 0.1);
 }
+
+[class*=icon-], [class^=icon-] {
+    display: inline-flex;
+    align-items: center;
+}
+
+[class*=icon-]:before, [class^=icon-]:before {
+    content: ' ';
+    height: 1em;
+    width: 1em;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    display: inline-block;
+}
+
+.icon-resize-small:before { background-image: url(/~static/e800.png); } /* '' */
+.icon-resize-full:before { background-image: url(/~static/e801.png); } /* '' */
+.icon-up-open:before { background-image: url(/~static/e802.png); } /* '' */
+.icon-article:before { background-image: url(/~static/e803.png); } /* '' */
+.icon-comment:before { background-image: url(/~static/e804.png); } /* '' */
+.icon-picture:before { background-image: url(/~static/e805.png); } /* '' */
+.icon-cancel:before { background-image: url(/~static/e80a.png); } /* '' */
+.icon-ok:before { background-image: url(/~static/e816.png); } /* '' */
+.icon-down-open:before { background-image: url(/~static/e817.png); } /* '' */
+.icon-left-open-1:before { background-image: url(/~static/e818.png); } /* '' */
+.icon-right-open-1:before { background-image: url(/~static/e81c.png); } /* '' */
+.icon-link:before { background-image: url(/~static/f07b.png); } /* '' */
+.icon-magic:before { background-image: url(/~static/f0d0.png); } /* '' */
+.icon-rocket:before { background-image: url(/~static/f135.png); } /* '' */
+.icon-paper-plane:before { background-image: url(/~static/f1d8.png); } /* '' */
+.icon-user-secret:before { background-image: url(/~static/f21b.png); } /* '' */
+.icon-hashtag:before { background-image: url(/~static/f292.png); } /* '' */
+.icon-percent:before { background-image: url(/~static/f295.png); } /* '' */

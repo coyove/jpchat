@@ -5,7 +5,7 @@ textarea::-webkit-scrollbar { display: none }
 <div style='padding: 0.5rem 0.25rem;height: 100%;background: #eaebec; position: relative'>
     {{if .err}}
     <div style='position:absolute;width:100%;top:0;left:0;background:#e5737380;padding:0.25rem;z-index: 100;text-align:center'>
-        {{.err}}
+        {{.err}} (<a href='/{{.name}}?w={{.width}}' target=_parent>reload</a>)
     </div>
     {{end}}
 
@@ -17,8 +17,8 @@ textarea::-webkit-scrollbar { display: none }
             </button>
             {{else}}
             <input {{if .err}}readonly{{end}} name=msg placeholder='Enter to send' autofocus tabindex=0 style="font:inherit;border:none;width: 100%;outline:none">
-            <div style='color: rgba(0,0,0,0.33); position:absolute; right: 0.5rem; top: 0; height: 100%;display:flex;align-items:center;font-size:80%'>
-                <span class=icon-user-secret> {{.uid}}</span>
+            <div style='opacity: 0.33; position:absolute; right: 0.5rem; top: 0; height: 100%;display:flex;align-items:center;font-size:80%'>
+                <span class=icon-user-secret>&nbsp;{{.uid}}</span>
             </div>
             <input type=submit default value=send style='display:none'>
             {{end}}

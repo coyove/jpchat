@@ -36,46 +36,46 @@ var tokenctr atomic.Uint32
 func makeToken(c Ctx) string {
 	enc, _ := cipher.NewGCM(aesToken)
 	nonce := randBytes(12)
-	data := sha1.Sum(c.IP)
+	data := sha1.Sum([]byte(c.UserAgent()))
 	binary.BigEndian.PutUint32(data[4:8], uint32(time.Now().Unix()))
 	binary.BigEndian.PutUint32(data[8:12], tokenctr.Add(1))
 	return hex.EncodeToString(enc.Seal(nonce, nonce, data[:12], nil))
 }
 
-func validateToken(c Ctx, tok string) bool {
+func validateToken(c Ctx, tok string) int {
 	data, _ := hex.DecodeString(tok)
 
 	enc, _ := cipher.NewGCM(aesToken)
 	if len(data) < enc.NonceSize() {
-		return false
+		return -1
 	}
 	nonce := data[:enc.NonceSize()]
 	data = data[enc.NonceSize():]
 
 	data, err := enc.Open(nil, nonce, data, nil)
 	if err != nil {
-		return false
+		return -1
 	}
 	if len(data) != 12 {
-		return false
+		return -1
 	}
 	var v [12]byte
 	copy(v[:], data)
 	if _, ok := tokenStore.Get(v); ok {
-		return false
+		return -2
 	}
 	tokenStore.Add(v, struct{}{})
 
-	ipHash := sha1.Sum(c.IP)
+	ipHash := sha1.Sum([]byte(c.UserAgent()))
 	if !bytes.Equal(ipHash[:4], v[:4]) {
 		logrus.Errorf("validate token: mismatch IPs")
-		return false
+		return -3
 	}
 	if uint32(time.Now().Unix())-binary.BigEndian.Uint32(v[4:8]) > 86400 {
 		logrus.Errorf("validate token: too old")
-		return false
+		return -4
 	}
-	return true
+	return 1
 }
 
 func handleSend(c Ctx) {
@@ -92,9 +92,13 @@ func handleSend(c Ctx) {
 		c.AddIP()
 
 		tok := c.FormValue("token")
-		if !validateToken(c, tok) {
-			logrus.Infof("bad token: %s", tok)
-			err = "Invalid session, please reload"
+		switch res := validateToken(c, tok); res {
+		case 1:
+		case -2, -3, -4:
+			err = [...]string{"Token too old", "UA changed", "Cooling down"}[res+4]
+			goto NO_SEND
+		default:
+			err = "Invalid session"
 			goto NO_SEND
 		}
 
@@ -130,5 +134,6 @@ NO_SEND:
 		"multi": c.Query.Get("multi") != "",
 		"err":   err,
 		"token": makeToken(c),
+		"width": c.Query.Get("width"),
 	})
 }

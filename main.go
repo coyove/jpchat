@@ -22,6 +22,7 @@ import (
 
 	"github.com/coyove/bbolt"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/image/font/opentype"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -66,6 +67,7 @@ func findChannel(name string) (*Channel, bool) {
 
 func main() {
 	flag.Parse()
+
 	lf := &logFormatter{io.MultiWriter(os.Stdout, &lumberjack.Logger{
 		Filename:   "logs/chat.log",
 		MaxSize:    20,
@@ -185,15 +187,17 @@ func main() {
 			logrus.Fatal(http.ListenAndServe(":http", autocertManager.HTTPHandler(nil)))
 		}()
 
-		addr = ":443"
-		srv.Addr = addr
+		srv.Addr = ":https"
 		srv.TLSConfig = &tls.Config{
 			GetCertificate: autocertManager.GetCertificate,
+			NextProtos:     []string{"http/0.9", "http/1.0", "http/1.1", acme.ALPNProto},
 		}
+		logrus.Infof("serving https")
+		logrus.Fatal(srv.ListenAndServeTLS("", ""))
+	} else {
+		logrus.Infof("serving at %v", addr)
+		logrus.Fatal(srv.ListenAndServe())
 	}
-
-	logrus.Infof("serving at %v", addr)
-	logrus.Fatal(srv.ListenAndServe())
 }
 
 type logFormatter struct {

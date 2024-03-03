@@ -1,2 +1,4 @@
 *.db
 logs
+deploy.sh
+jpchat*
