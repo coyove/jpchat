@@ -132,6 +132,8 @@ func main() {
 			c.ResponseWriter.Header().Add("Content-Type", "text/css")
 		case strings.HasSuffix(p, ".png"):
 			c.ResponseWriter.Header().Add("Content-Type", "image/png")
+		case strings.HasSuffix(p, ".svg"):
+			c.ResponseWriter.Header().Add("Content-Type", "image/svg+xml")
 		}
 		c.ResponseWriter.Header().Add("Cache-Control", "public, max-age=8640000")
 
